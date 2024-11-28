@@ -20,6 +20,8 @@ namespace CG_Lab
         float[,] Zbuffer;
         Bitmap zbbm;
 
+        LightSource lightSource;
+
         private enum RenderingOp
         {
             DrawCube = 0, DrawTetrahedron, DrawOctahedron, DrawIcosahedron, DrawDodecahedron,
@@ -60,6 +62,8 @@ namespace CG_Lab
             clearPB = new Bitmap(pictureBox1.Image);
             zbbm = clearPB;
 
+            lightSource = new LightSource(-10, -10, 0, 255, 255, 255, true);
+
             camera = new Camera(
                                 position:    new Vertex(pictureBox1.Width / 2, pictureBox1.Height / 2, -10f),
                                 target:      new Vertex(pictureBox1.Width / 2, pictureBox1.Height / 2, 0),
@@ -99,6 +103,12 @@ namespace CG_Lab
         {
             if (currentPolyhedron == null) return;
 
+            // Очищаем Z-буфер
+            zbbm = new Bitmap(clearPB);
+            for (int i = 0; i < pictureBox1.Width; i++)
+                for (int j = 0; j < pictureBox1.Height; j++)
+                    Zbuffer[i, j] = float.MaxValue;
+
             // Получаем View и Projection матрицы из камеры
             var viewMatrix = camera.ViewMatrix;
 
@@ -109,28 +119,45 @@ namespace CG_Lab
 
             PolyHedron renderPoly = currentPolyhedron.FilterVisibleFaces(camera, Projection.Perspective);
 
+            // Ламберт
+            if (lightSource.Gouraud)
+                for (int i = 0; i < renderPoly.Vertices.Count; i++)
+                    renderPoly.Vertices[i] = new Vertex(renderPoly.Vertices[i].X, renderPoly.Vertices[i].Y, renderPoly.Vertices[i].Z,
+                        GetVertexColorLambert(renderPoly.Vertices[i], renderPoly.Normals[i], renderPoly.color));
+
             // Очистка экрана
             // pictureBox1.Image = clearPB;
 
             for (int i = 0; i < renderPoly.Vertices.Count; i++)
             {
+                Color c = renderPoly.Vertices[i].color;
+
                 // Преобразование в пространстве камеры
                 renderPoly.Vertices[i] *= viewMatrix;
+                float z = renderPoly.Vertices[i].Z;
                 renderPoly.Vertices[i] *= projectionMatrix;
 
                 renderPoly.Vertices[i] = new Vertex((renderPoly.Vertices[i].X + 1) * pictureBox1.Width / 2,
                     (1 - renderPoly.Vertices[i].Y) * pictureBox1.Height / 2,
-                    renderPoly.Vertices[i].Z);
+                    z,
+                    c);
             }
 
             // Z-буфер
-            zbbm = new Bitmap(clearPB);
-            for (int i = 0; i < pictureBox1.Width; i++)
-                for (int j = 0; j < pictureBox1.Height; j++)
-                    Zbuffer[i, j] = float.MaxValue;
             ZbufferDraw(renderPoly);
 
             // pictureBox1.Invalidate();
+        }
+
+        private Color GetVertexColorLambert(Vertex v, Normal n, Color polyColor)
+        {
+            Normal toLS = new Normal(lightSource.Pos.X - v.X, lightSource.Pos.Y - v.Y, lightSource.Pos.Z - v.Z);
+
+            float cos = Math.Max(0f, n.NX * toLS.NX + n.NY * toLS.NY + n.NZ * toLS.NZ);
+
+            return Color.FromArgb(Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.R * lightSource.Intensity.R * cos))),
+                Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.G * lightSource.Intensity.G * cos))),
+                Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.B * lightSource.Intensity.B * cos))));
         }
 
         private void ZbufferDraw(PolyHedron poly)
@@ -182,18 +209,32 @@ namespace CG_Lab
                     PointF leftBorder = FindIntersection(leftPoints[il - 1], leftPoints[il], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i));
                     PointF rightBorder = FindIntersection(rightPoints[ir - 1], rightPoints[ir], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i));
 
+                    Color lbColor = InterpolateColor(leftPoints[il - 1], leftPoints[il], leftBorder);
+                    Color rbColor = InterpolateColor(rightPoints[ir - 1], rightPoints[ir], rightBorder);
+
                     for (int j = (int)Math.Round(leftBorder.X); j <= (int)Math.Round(rightBorder.X); j++)
                     {
                         if (j < 0 || j >= pictureBox1.Width || i < 0 || i >= pictureBox1.Height) continue;
 
                         float z = InterpolateZ(v[0], v[1], v[2], new PointF(j, i));
+
+                        // Закрашивание грани выбранным методом
                         if (z > 0 && z < Zbuffer[j, i])
                         {
                             Zbuffer[j, i] = z;
-                            if (j == (int)Math.Round(leftBorder.X) || j == (int)Math.Round(rightBorder.X) || i == minY || i == maxY)
-                                zbbm.SetPixel(j, i, Color.Black);
+                            if (lightSource.Gouraud)
+                            {
+                                zbbm.SetPixel(j, i, InterpolateColor(new Vertex(leftBorder.X, leftBorder.Y, z, lbColor),
+                                    new Vertex(rightBorder.X, rightBorder.Y, z, rbColor),
+                                    new PointF(j, i)));
+                            }
                             else
-                                zbbm.SetPixel(j, i, Color.Azure);
+                            {
+                                if (j == (int)Math.Round(leftBorder.X) || j == (int)Math.Round(rightBorder.X) || i == minY || i == maxY)
+                                    zbbm.SetPixel(j, i, Color.Black);
+                                else
+                                    zbbm.SetPixel(j, i, poly.color);
+                            }
                         }
                     }
 
@@ -203,6 +244,22 @@ namespace CG_Lab
             }
 
             pictureBox1.Image = zbbm;
+        }
+
+        private Color InterpolateColor(Vertex v1, Vertex v2, PointF p)
+        {
+            // Вектор AB
+            float dx = v2.X - v1.X;
+            float dy = v2.Y - v1.Y;
+
+            float lengthSquared = dx * dx + dy * dy;
+
+            // Проекция P на линию AB
+            float t = ((p.X - v1.X) * dx + (p.Y - v1.Y) * dy) / lengthSquared;
+
+            return Color.FromArgb(Math.Max(0, Math.Min(255, (int)(v1.color.R + t * (v2.color.R - v1.color.R)))),
+                Math.Max(0, Math.Min(255, (int)(v1.color.G + t * (v2.color.G - v1.color.G)))),
+                Math.Max(0, Math.Min(255, (int)(v1.color.B + t * (v2.color.B - v1.color.B)))));
         }
 
         private float GetPos(Vertex point, Vertex start, Vertex end)
@@ -247,7 +304,7 @@ namespace CG_Lab
         }
 
         private float moveSpeed = 0.2f;
-        private float rotateSpeed = 0.03f;
+        private float rotateSpeed = 0.01f;
         private float horizontalAngle = (float)Math.PI / 2;
         private float verticalAngle = 0f;
 
@@ -589,18 +646,18 @@ namespace CG_Lab
             switch (comboBox2.SelectedIndex)
             {
                 case (int)AffineOp.Move:
-                    DrawPolyhedron(currentPolyhedron = currentPolyhedron
-                                                       .Moved((float)numericUpDown1.Value, (float)numericUpDown2.Value, (float)numericUpDown3.Value),
-                                                       currPlane);
+                    currentPolyhedron = currentPolyhedron
+                        .Moved((float)numericUpDown1.Value, (float)numericUpDown2.Value, (float)numericUpDown3.Value);
+                    RenderScene();
                     break;
                 case (int)AffineOp.Scaling:
                     anchor = new Vertex((float)numericUpDown4.Value, (float)numericUpDown5.Value, (float)numericUpDown6.Value);
 
-                    DrawPolyhedron(currentPolyhedron = currentPolyhedron
-                                                       .Moved(-anchor.X, -anchor.Y, -anchor.Z)
-                                                       .Scaled((float)numericUpDown1.Value, (float)numericUpDown2.Value, (float)numericUpDown3.Value)
-                                                       .Moved(anchor.X, anchor.Y, anchor.Z),
-                                                       currPlane);
+                    currentPolyhedron = currentPolyhedron
+                        .Moved(-anchor.X, -anchor.Y, -anchor.Z)
+                        .Scaled((float)numericUpDown1.Value, (float)numericUpDown2.Value, (float)numericUpDown3.Value)
+                        .Moved(anchor.X, anchor.Y, anchor.Z);
+                    RenderScene();
                     break;
 
                 case (int)AffineOp.Rotation:
@@ -623,11 +680,13 @@ namespace CG_Lab
                     float l = v.X / length;
                     float m = v.Y / length;
                     float n = v.Z / length;
-                    DrawPolyhedron(currentPolyhedron = currentPolyhedron
+                    
+                    currentPolyhedron = currentPolyhedron
                         .Moved(-anchor.X, -anchor.Y, -anchor.Z)
                         .LineRotated(l, m, n, (float)numericUpDown1.Value)
-                        .Moved(anchor.X, anchor.Y, anchor.Z),
-                        currPlane);
+                        .Moved(anchor.X, anchor.Y, anchor.Z);
+
+                    RenderScene();
                     break;
                 case (int)AffineOp.AxisXRotation:
                     centerX = 0;
@@ -691,19 +750,22 @@ namespace CG_Lab
         private void axisXNumeric_ValueChanged(object sender, EventArgs e)
         {
             axisZNumeric.Value = 360 - axisXNumeric.Value - axisYNumeric.Value;
-            DrawPolyhedron(currentPolyhedron, currPlane);
+            //DrawPolyhedron(currentPolyhedron, currPlane);
+            RenderScene();
         }
 
         private void axisYNumeric_ValueChanged(object sender, EventArgs e)
         {
             axisZNumeric.Value = 360 - axisXNumeric.Value - axisYNumeric.Value;
-            DrawPolyhedron(currentPolyhedron, currPlane);
+            //DrawPolyhedron(currentPolyhedron, currPlane);
+            RenderScene();
         }
 
         private void projectionListBox_SelectedIndexChanged(object sender, EventArgs e)
         {
             g.Clear(pictureBox1.BackColor);
-            DrawPolyhedron(currentPolyhedron, currPlane);
+            //DrawPolyhedron(currentPolyhedron, currPlane);
+            RenderScene();
         }
 
 
@@ -727,7 +789,8 @@ namespace CG_Lab
                 .Moved(pictureBox1.Width / 2 , pictureBox1.Height / 2, 0);
             
             // Рисуем полученную фигуру вращения
-            DrawPolyhedron(currentPolyhedron, currPlane);
+            //DrawPolyhedron(currentPolyhedron, currPlane);
+            RenderScene();
         }
 
         private void button3_Click(object sender, EventArgs e)
@@ -773,21 +836,21 @@ namespace CG_Lab
         {
             if (openFileDialog1.ShowDialog() == DialogResult.OK)
             {
-                try
-                {
+                //try
+                //{
                     currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName);
-                    currentPolyhedron = currentPolyhedron.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, 0);
+                    currentPolyhedron = currentPolyhedron.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, -1);
                     RenderScene();
                     //DrawPolyhedron(currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName), currPlane);
                         //.Scaled(100, 100, 100)
                         //.RotatedXAxis(180)
                         //.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, 0), currPlane);
                     MessageBox.Show("Модель успешно загружена.", "Загрузка", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка при загрузке файла: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                //}
+                //catch (Exception ex)
+                //{
+                    //MessageBox.Show($"Ошибка при загрузке файла: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                //}
             }
         }
 
@@ -807,8 +870,22 @@ namespace CG_Lab
 
             // Получаем нормализованный вектор обзора
             //viewDirection = CalculateViewVector(cameraPosition);
-            // DrawPolyhedron(currentPolyhedron.FilterVisibleFaces(viewDirection), currPlane);
+            //DrawPolyhedron(currentPolyhedron.FilterVisibleFaces(viewDirection), currPlane);
 
+        }
+    }
+
+    public class LightSource
+    {
+        public Vertex Pos { get; set; }
+        public Color Intensity { get; set; }
+        public bool Gouraud {  get; set; }
+
+        public LightSource(float x, float y, float z, int r, int g, int b, bool gouraud)
+        {
+            Pos = new Vertex(x, y, z);
+            Intensity = Color.FromArgb(r, g, b);
+            Gouraud = gouraud;
         }
     }
 
@@ -1046,6 +1123,7 @@ namespace CG_Lab
 
     public struct Vertex
     {
+        public Color color { get; set; }
         public float X { get; set; }
 
         public float Y { get; set; }
@@ -1057,6 +1135,15 @@ namespace CG_Lab
             X = x;
             Y = y;
             Z = z;
+            color = Color.White;
+        }
+
+        public Vertex(float x, float y, float z, Color c)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+            color = c;
         }
 
         // Находим центр грани
@@ -1270,8 +1357,10 @@ namespace CG_Lab
         }
     }
 
+
     public class PolyHedron
     {
+        public Color color { get; private set; }
         public List<Face> Faces { get; set; }
 
         public List<Vertex> Vertices { get; set; }
@@ -1283,13 +1372,16 @@ namespace CG_Lab
             Faces = new List<Face>();
             Vertices = new List<Vertex>();
             Normals = new List<Normal>();
+            Random random = new Random();
+            color = Color.FromArgb(random.Next(256), random.Next(256), random.Next(256));
         }
 
-        public PolyHedron(List<Face> faces, List<Vertex> vertices, List<Normal> normals)
+        public PolyHedron(List<Face> faces, List<Vertex> vertices, List<Normal> normals, Color color)
         {
             Faces = faces;
             Vertices = vertices;
             Normals = normals;
+            this.color = color;
         }
 
         public static void AdjustNormals(PolyHedron polyhedron)
@@ -1313,7 +1405,7 @@ namespace CG_Lab
                 // Если нормаль направлена внутрь, инвертируем её
                 if (dotProduct < 0)
                 {
-                    normal = new Vertex(-normal.X, -normal.Y, -normal.Z);
+                    //normal = new Vertex(-normal.X, -normal.Y, -normal.Z);
                 }
 
                 // Сохраняем нормаль
@@ -1673,7 +1765,7 @@ namespace CG_Lab
             }
 
             // Создаем новый PolyHedron с видимыми гранями
-            return new PolyHedron(visibleFaces, Vertices, Normals);
+            return new PolyHedron(visibleFaces, Vertices, Normals, Color.AliceBlue);
         }
 
         private static Matrix<float> GetRotationMatrix(char axis, float angleDegrees)
@@ -2138,7 +2230,7 @@ namespace CG_Lab
 
         public PolyHedron Clone()
         {
-            var newPoly = new PolyHedron(this.Faces, new List<Vertex>(this.Vertices), new List<Normal>(this.Normals));
+            var newPoly = new PolyHedron(this.Faces, new List<Vertex>(this.Vertices), new List<Normal>(this.Normals), this.color);
             return newPoly;
         }
 
