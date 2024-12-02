@@ -188,9 +188,7 @@ namespace CG_Lab
                         continue;
 
                     if (GetPos(v[i], vt, vb) < 0) 
-                    {
-                            leftPoints.Add(v[i]);
-                    }
+                        leftPoints.Add(v[i]);
                     else
                         rightPoints.Add(v[i]);
                 }
@@ -198,21 +196,21 @@ namespace CG_Lab
                 leftPoints.Add(vt);
                 rightPoints.Add(vt);
 
-                int minY = (int)Math.Round(v.Min(vertex => vertex.Y));
-                int maxY = (int)Math.Round(v.Max(vertex => vertex.Y));
+                int minY = (int)(v.Min(vertex => vertex.Y));
+                int maxY = (int)(v.Max(vertex => vertex.Y));
 
                 int il = 1, ir = 1;
-                while (il < leftPoints.Count - 1 && (int)Math.Round(leftPoints[il].Y) == (int)Math.Round(leftPoints[il - 1].Y)) il++;
-                while (ir < rightPoints.Count - 1 && (int)Math.Round(rightPoints[ir].Y) == (int)Math.Round(rightPoints[ir - 1].Y)) ir++;
+                while (il < leftPoints.Count - 1 && (int)(leftPoints[il].Y) == (int)(leftPoints[il - 1].Y)) il++;
+                while (ir < rightPoints.Count - 1 && (int)(rightPoints[ir].Y) == (int)(rightPoints[ir - 1].Y)) ir++;
                 for (int i = minY; i <= maxY; i++)
                 {
                     PointF leftBorder = FindIntersection(leftPoints[il - 1], leftPoints[il], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i));
-                    PointF rightBorder = FindIntersection(rightPoints[ir - 1], rightPoints[ir], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i));
+                    PointF rightBorder = FindIntersection(rightPoints[ir - 1], rightPoints[ir], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i), true);
 
                     Color lbColor = InterpolateColor(leftPoints[il - 1], leftPoints[il], leftBorder);
                     Color rbColor = InterpolateColor(rightPoints[ir - 1], rightPoints[ir], rightBorder);
 
-                    for (int j = (int)Math.Round(leftBorder.X); j <= (int)Math.Round(rightBorder.X); j++)
+                    for (int j = (int)(leftBorder.X); j <= (int)(rightBorder.X); j++)
                     {
                         if (j < 0 || j >= pictureBox1.Width || i < 0 || i >= pictureBox1.Height) continue;
 
@@ -230,7 +228,7 @@ namespace CG_Lab
                             }
                             else
                             {
-                                if (j == (int)Math.Round(leftBorder.X) || j == (int)Math.Round(rightBorder.X) || i == minY || i == maxY)
+                                if (j == (int)(leftBorder.X) || j == (int)(rightBorder.X) || i == minY || i == maxY)
                                     zbbm.SetPixel(j, i, Color.Black);
                                 else
                                     zbbm.SetPixel(j, i, poly.color);
@@ -238,8 +236,8 @@ namespace CG_Lab
                         }
                     }
 
-                    while (il < leftPoints.Count - 1 && i == (int)Math.Round(leftPoints[il].Y)) il++;
-                    while (ir < rightPoints.Count - 1 && i == (int)Math.Round(rightPoints[ir].Y)) ir++;
+                    while (il < leftPoints.Count - 1 && i == (int)(leftPoints[il].Y)) il++;
+                    while (ir < rightPoints.Count - 1 && i == (int)(rightPoints[ir].Y)) ir++;
                 }
             }
 
@@ -273,18 +271,20 @@ namespace CG_Lab
             float B = p1.Z * (p2.X - p3.X) + p2.Z * (p3.X - p1.X) + p3.Z * (p1.X - p2.X);
             float C = p1.X * (p2.Y - p3.Y) + p2.X * (p3.Y - p1.Y) + p3.X * (p1.Y - p2.Y);
             float D = - (p1.X * (p2.Y * p3.Z - p3.Y * p2.Z) + p2.X * (p3.Y * p1.Z - p1.Y * p3.Z) + p3.X * (p1.Y * p2.Z - p2.Y * p1.Z));
-            /*
-            float A = (p2.Y - p1.Y) * (p3.Z - p1.Z) - (p2.Z - p1.Z) * (p3.Y - p1.Y);
-            float B = (p2.Z - p1.Z) * (p3.X - p1.X) - (p2.X - p1.X) * (p3.Z - p1.Z);
-            float C = (p2.X - p1.X) * (p3.Y - p1.Y) - (p2.Y - p1.Y) * (p3.X - p1.X);
-            float D = -(A * p1.X + B * p1.Y + C * p1.Z);
-            */
 
             return -(A * p4.X + B * p4.Y + D) / C;
         }
 
-        private PointF FindIntersection(Vertex p1, Vertex p2, PointF p3, PointF p4)
+        private PointF FindIntersection(Vertex p1, Vertex p2, PointF p3, PointF p4, bool isRight = false)
         {
+            if ((int)p1.Y == (int)p2.Y)
+            {
+                if (isRight)
+                    return new PointF((int)Math.Max(p1.X, p2.X), p3.Y);
+                else
+                    return new PointF((int)Math.Min(p1.X, p2.X), p3.Y);
+            }
+
             float A1 = p2.Y - p1.Y;
             float B1 = p1.X - p2.X;
             float C1 = p2.X * p1.Y - p1.X * p2.Y;
