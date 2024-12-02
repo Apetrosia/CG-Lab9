@@ -5,11 +5,6 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.IO;
-using System.Runtime.InteropServices.ComTypes;
-using System.Windows.Forms;
-using System.Security.Cryptography;
-using System.Text.RegularExpressions;
-using System.Reflection;
 
 namespace CG_Lab
 {
@@ -62,7 +57,7 @@ namespace CG_Lab
             clearPB = new Bitmap(pictureBox1.Image);
             zbbm = clearPB;
 
-            lightSource = new LightSource(-10, -10, 0, 255, 255, 255, true);
+            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -50f, 255, 255, 255, true);
 
             camera = new Camera(
                                 position:    new Vertex(pictureBox1.Width / 2, pictureBox1.Height / 2, -10f),
@@ -119,6 +114,11 @@ namespace CG_Lab
 
             PolyHedron renderPoly = currentPolyhedron.FilterVisibleFaces(camera, Projection.Perspective);
 
+            if (!lightSource.Gouraud)
+            {
+                renderPoly = renderPoly.ScaledAroundCenter(150, 150, 150);
+            }
+
             // Ламберт
             if (lightSource.Gouraud)
                 for (int i = 0; i < renderPoly.Vertices.Count; i++)
@@ -132,19 +132,31 @@ namespace CG_Lab
             {
                 Color c = renderPoly.Vertices[i].color;
 
-                // Преобразование в пространстве камеры
-                renderPoly.Vertices[i] *= viewMatrix;
-                float z = renderPoly.Vertices[i].Z;
-                renderPoly.Vertices[i] *= projectionMatrix;
+                if (lightSource.Gouraud)
+                {
+                    // Преобразование в пространстве камеры
+                     renderPoly.Vertices[i] *= viewMatrix;
 
-                renderPoly.Vertices[i] = new Vertex((renderPoly.Vertices[i].X + 1) * pictureBox1.Width / 2,
-                    (1 - renderPoly.Vertices[i].Y) * pictureBox1.Height / 2,
-                    z,
-                    c);
+                    // renderPoly.Normals[i] *= viewMatrix;
+
+                    // lightSource.Pos *= viewMatrix;
+
+                    float z = renderPoly.Vertices[i].Z;
+                    renderPoly.Vertices[i] *= projectionMatrix;
+
+                    renderPoly.Vertices[i] = new Vertex((renderPoly.Vertices[i].X + 1) * pictureBox1.Width / 2,
+                        (1 - renderPoly.Vertices[i].Y) * pictureBox1.Height / 2,
+                        z,
+                        c);
+                }
+
             }
 
             // Z-буфер
-            ZbufferDraw(renderPoly);
+            if (lightSource.Gouraud)
+                ZbufferDraw(renderPoly);
+            else
+                ZbufferDraw2(renderPoly);
 
             // pictureBox1.Invalidate();
         }
@@ -158,6 +170,205 @@ namespace CG_Lab
             return Color.FromArgb(Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.R * lightSource.Intensity.R * cos))),
                 Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.G * lightSource.Intensity.G * cos))),
                 Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.B * lightSource.Intensity.B * cos))));
+        }
+
+        private void ZbufferDraw2(PolyHedron poly)
+        {
+            for (int i = 0; i < pictureBox1.Width; i++) //x
+                for (int j = 0; j < pictureBox1.Height; j++) //y
+                {
+                    Zbuffer[i, j] = float.MinValue;
+                }
+
+            foreach (Face face in poly.Faces)
+            {
+                List<List<int>> triangulatedFaces = TriangulateFace(face);
+
+                foreach (var triangle in triangulatedFaces)
+                {
+                    DrawTriang(triangle, poly, lightSource.Pos);
+                }
+            }
+
+            pictureBox1.Image = zbbm;
+        }
+
+        public void DrawTriang(List<int> triangle, PolyHedron poly, Vertex lightpos)
+        {
+            var triang = triangle.Select(v => poly.Vertices[v]).OrderBy(v => v.Y).ToList();
+            var up = triang[0]; var mid = triang[1]; var bot = triang[2];
+
+            Vertex v1 = new Vertex(poly.Vertices[triangle[0]].X, poly.Vertices[triangle[0]].Y, poly.Vertices[triangle[0]].Z);
+            Vertex n1 = new Vertex(poly.Normals[triangle[0]].NX, poly.Normals[triangle[0]].NY, poly.Normals[triangle[0]].NZ);
+            
+            Vertex v2 = new Vertex(poly.Vertices[triangle[1]].X, poly.Vertices[triangle[1]].Y, poly.Vertices[triangle[1]].Z);
+            Vertex n2 = new Vertex(poly.Normals[triangle[1]].NX, poly.Normals[triangle[1]].NY, poly.Normals[triangle[1]].NZ);
+            
+            Vertex v3 = new Vertex(poly.Vertices[triangle[2]].X, poly.Vertices[triangle[2]].Y, poly.Vertices[triangle[2]].Z);
+            Vertex n3 = new Vertex(poly.Normals[triangle[2]].NX, poly.Normals[triangle[2]].NY, poly.Normals[triangle[2]].NZ);
+
+            float x1, y1, z1, x2, y2, z2;
+            for (var cur_y = up.Y; cur_y <= mid.Y; cur_y += 0.5f)
+            {
+                x1 = FindXbyY(cur_y, up.X, up.Y, mid.X, mid.Y);
+                z1 = FindZbyY(cur_y, up.Y, up.Z, mid.Y, mid.Z);
+
+                x2 = FindXbyY(cur_y, up.X, up.Y, bot.X, bot.Y);
+                z2 = FindZbyY(cur_y, up.Y, up.Z, bot.Y, bot.Z);
+
+                if (x1 < x2)
+                {
+                    for (float cur_x = x1; cur_x <= x2; cur_x += 0.5f)
+                    {
+                        float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        {
+                            Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
+                            Vertex p = new Vertex(cur_x, cur_y, cur_z);
+                            Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                        }
+                    }
+                }
+                else
+                {
+                    for (float cur_x = x1; cur_x >= x2; cur_x -= 0.5f)
+                    {
+                        float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        {
+                            Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
+                            Vertex p = new Vertex(cur_x, cur_y, cur_z);
+                            Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                        }
+                    }
+                }
+            }
+            for (var cur_y = mid.Y; cur_y <= bot.Y; cur_y += 0.5f)
+            {
+                x1 = FindXbyY(cur_y, mid.X, mid.Y, bot.X, bot.Y);
+                z1 = FindZbyY(cur_y, mid.Y, mid.Z, bot.Y, bot.Z);
+
+                x2 = FindXbyY(cur_y, up.X, up.Y, bot.X, bot.Y);
+                z2 = FindZbyY(cur_y, up.Y, up.Z, bot.Y, bot.Z);
+
+                if (x1 < x2)
+                {
+                    for (float cur_x = x1; cur_x <= x2; cur_x += 0.5f)
+                    {
+                        float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        {
+                            Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
+                            Vertex p = new Vertex(cur_x, cur_y, cur_z);
+                            Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                        }
+                    }
+                }
+                else
+                {
+                    for (float cur_x = x1; cur_x >= x2; cur_x -= 0.5f)
+                    {
+                        float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        {
+                            Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
+                            Vertex p = new Vertex(cur_x, cur_y, cur_z);
+                            Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                        }
+                    }
+                }
+
+            }
+
+
+        }
+
+        public Color ToonShadingModel(Vertex n, Vertex l, Color diffColor)
+        {
+            Vertex n2 = n.Normalize();
+            Vertex l2 = l.Normalize();
+            double diff = 0.2 + Math.Max(Vertex.Dot(n2, l2), 0.0);
+            Color clr;
+
+            if (diff < 0.4)
+            {
+                clr = MultColor(0.2, diffColor);
+            }
+            else if (diff < 0.7)
+            {
+                clr = diffColor;
+            }
+            else //if (diff < 1.15)
+            {
+                clr = MultColor(1.3, diffColor);
+            }
+            //else  // Блики
+            //{
+            //    clr = Color.White;
+            //}
+
+            return clr;
+        }
+
+        private static Color MultColor(double c, Color color)
+        {
+            return Color.FromArgb(Math.Min((int)(c * color.R), 255), Math.Min((int)(c * color.G), 255), Math.Min((int)(c * color.R), 255));
+        }
+
+        private Vertex Interpolate(Vertex p, Vertex v1, Vertex n1, Vertex v2, Vertex n2, Vertex v3, Vertex n3)
+        {
+            float w1 = 0, w2 = 0, w3 = 0;
+
+            w1 = ((v2.Y - v3.Y) * (p.X - v3.X) + (v3.X - v2.X) * (p.Y - v3.Y)) /
+                 ((v2.Y - v3.Y) * (v1.X - v3.X) + (v3.X - v2.X) * (v1.Y - v3.Y));
+
+            w2 = ((v3.Y - v1.Y) * (p.X - v3.X) + (v1.X - v3.X) * (p.Y - v3.Y)) /
+                 ((v2.Y - v3.Y) * (v1.X - v3.X) + (v3.X - v2.X) * (v1.Y - v3.Y));
+
+            w3 = 1 - w1 - w2;
+            return (w1 * n1 + w2 * n2 + w3 * n3).Normalize();
+        }
+
+        private float FindXbyY(float cur_y, float x1, float y1, float x2, float y2)
+        {
+            if (y2 - y1 != 0)
+                return (cur_y - y1) * (x2 - x1) / (y2 - y1) + x1;
+            else
+                return (cur_y - y1) * (x2 - x1) / 0.0001f + x1;
+        }
+
+        private float FindZbyY(float cur_y, float y1, float z1, float y2, float z2)
+        {
+            if (y2 - y1 != 0)
+                return (cur_y - y1) * (z2 - z1) / (y2 - y1) + z1;
+            else
+                return (cur_y - y1) * (z2 - z1) / 0.0001f + z1;
+        }
+        private float FindZbyX(float cur_x, float x1, float z1, float x2, float z2)
+        {
+            if (x2 - x1 != 0)
+                return (cur_x - x1) * (z2 - z1) / (x2 - x1) + z1;
+            else
+                return (cur_x - x1) * (z2 - z1) / 0.0001f + z1;
+        }
+
+        private bool CheckBorders(int x, int y)
+        {
+            return x >= 0 && y >= 0 && x < pictureBox1.Width && y < pictureBox1.Height;
+        }
+
+        private List<List<int>> TriangulateFace(Face face)
+        {
+            List<List<int>> triangulations = new List<List<int>> { };
+            for (int i = 2; i < face.Vertices.Length; i++)
+            {
+                triangulations.Add(new List<int> { face.Vertices[0], face.Vertices[i - 1], face.Vertices[i] });
+            }
+            return triangulations;
         }
 
         private void ZbufferDraw(PolyHedron poly)
@@ -209,8 +420,36 @@ namespace CG_Lab
                     PointF leftBorder = FindIntersection(leftPoints[il - 1], leftPoints[il], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i));
                     PointF rightBorder = FindIntersection(rightPoints[ir - 1], rightPoints[ir], new PointF(-1, i), new PointF(pictureBox1.Width + 1, i));
 
-                    Color lbColor = InterpolateColor(leftPoints[il - 1], leftPoints[il], leftBorder);
-                    Color rbColor = InterpolateColor(rightPoints[ir - 1], rightPoints[ir], rightBorder);
+                    Color lbColor = Color.White; // без инициализации ошибка компиляции
+                    Color rbColor = Color.White;
+
+                    Normal lbNormal = null;
+                    Normal rbNormal = null;
+
+                    if (lightSource.Gouraud)
+                    {
+                        lbColor = InterpolateColor(leftPoints[il - 1], leftPoints[il], leftBorder);
+                        rbColor = InterpolateColor(rightPoints[ir - 1], rightPoints[ir], rightBorder);
+                    }
+                    else
+                    {
+                        lbNormal = InterpolateNormal(
+                            new PointF(leftPoints[il].X, leftPoints[il].Y),
+                            new PointF(leftPoints[il - 1].X, leftPoints[il - 1].Y),
+                            currentPolyhedron.Normals[face.Vertices.First(index => poly.Vertices[index] == leftPoints[il])],
+                            currentPolyhedron.Normals[face.Vertices.First(index => poly.Vertices[index] == leftPoints[il - 1])], 
+                            leftBorder
+                            );
+
+                        rbNormal = InterpolateNormal(
+                            new PointF(rightPoints[ir - 1].X, rightPoints[ir - 1].Y),
+                            new PointF(rightPoints[ir].X, rightPoints[ir].Y),
+                            currentPolyhedron.Normals[face.Vertices.First(index => poly.Vertices[index] == rightPoints[ir - 1])],
+                            currentPolyhedron.Normals[face.Vertices.First(index => poly.Vertices[index] == rightPoints[ir])],
+                            rightBorder
+                            );
+                    }
+                    
 
                     for (int j = (int)Math.Round(leftBorder.X); j <= (int)Math.Round(rightBorder.X); j++)
                     {
@@ -222,18 +461,33 @@ namespace CG_Lab
                         if (z > 0 && z < Zbuffer[j, i])
                         {
                             Zbuffer[j, i] = z;
+
+                            PointF fragPos = new PointF(j, i);
+
                             if (lightSource.Gouraud)
                             {
                                 zbbm.SetPixel(j, i, InterpolateColor(new Vertex(leftBorder.X, leftBorder.Y, z, lbColor),
                                     new Vertex(rightBorder.X, rightBorder.Y, z, rbColor),
-                                    new PointF(j, i)));
+                                    fragPos));
                             }
                             else
                             {
+                                Normal normal = InterpolateNormal(leftBorder, rightBorder, lbNormal, rbNormal, fragPos);
+
+                                Vertex lightPosCameraOriented = lightSource.Pos; // * camera.ViewMatrix;
+
+                                /*lightPosCameraOriented = new Vertex((lightPosCameraOriented.X + 1) * pictureBox1.Width / 2,
+                    (1 - lightPosCameraOriented.Y) * pictureBox1.Height / 2,
+                    lightPosCameraOriented.Z);*/
+
+                                Color shadedColor = CalculateToonShading(normal, lightPosCameraOriented, camera.Position, poly.color, new Vertex(fragPos.X, fragPos.Y, z));
+
+                                // zbbm.SetPixel(j, i, shadedColor);
+
                                 if (j == (int)Math.Round(leftBorder.X) || j == (int)Math.Round(rightBorder.X) || i == minY || i == maxY)
                                     zbbm.SetPixel(j, i, Color.Black);
                                 else
-                                    zbbm.SetPixel(j, i, poly.color);
+                                    zbbm.SetPixel(j, i, shadedColor);
                             }
                         }
                     }
@@ -244,6 +498,77 @@ namespace CG_Lab
             }
 
             pictureBox1.Image = zbbm;
+        }
+
+        private Color CalculateToonShading(Normal normal, Vertex lightPos, Vertex cameraPos, Color baseColor, Vertex fragPos)
+        {
+            // lightPos = new Vertex(-lightPos.X, -lightPos.Y, -lightPos.Z);
+
+            // Light direction
+            Vertex lightDir = (lightPos - fragPos).Normalize();
+
+            // View direction
+            Vertex viewDir = (cameraPos - fragPos).Normalize();
+
+            // Reflection direction for Phong specular
+            Vertex reflectDir = Vertex.Reflect(new Vertex(-lightDir.X, -lightDir.Y, -lightDir.Z), new Vertex(normal.NX, normal.NY, normal.NZ));
+
+            // Ambient component
+            float ambientIntensity = 0.2f;
+            Color ambient = ScaleColor(baseColor, ambientIntensity);
+
+            // Diffuse component
+            float diffIntensity = Math.Max(0, Vertex.Dot(new Vertex(normal.NX, normal.NY, normal.NZ), lightDir));
+            Color diffuse = ScaleColor(baseColor, Toonify(diffIntensity));
+
+            // Specular component (Phong)
+            float specIntensity = (float)Math.Pow(Math.Max(0, Vertex.Dot(viewDir, reflectDir)), 32); // Shininess = 16
+            Color specular = ScaleColor(Color.White, Toonify(specIntensity));
+
+            // Combine
+            return CombineColors(ambient, diffuse, specular);
+        }
+
+        private float Toonify(float value)
+        {
+            if (value > 0.75f) return 1.0f;
+            if (value > 0.5f) return 0.7f;
+            if (value > 0.25f) return 0.4f;
+            return 0.1f;
+        }
+
+        private Color ScaleColor(Color color, float scale)
+        {
+            return Color.FromArgb(
+                (int)(color.R * scale),
+                (int)(color.G * scale),
+                (int)(color.B * scale)
+            );
+        }
+
+        private Color CombineColors(Color ambient, Color diffuse, Color specular)
+        {
+            int r = Math.Min(ambient.R + diffuse.R + specular.R, 255);
+            int g = Math.Min(ambient.G + diffuse.G + specular.G, 255);
+            int b = Math.Min(ambient.B + diffuse.B + specular.B, 255);
+
+            return Color.FromArgb(r, g, b);
+        }
+
+        private Normal InterpolateNormal(PointF v1, PointF v2, Normal n1, Normal n2, PointF p)
+        {
+            float abDistance = (float)Math.Sqrt((v1.X - v2.X) * (v1.X - v2.X) + (v1.Y - v2.Y) * (v1.Y - v2.Y));
+            float apDistance = (float)Math.Sqrt((v1.X - p.X) * (v1.X - p.X) + (v1.Y - p.Y) * (v1.Y - p.Y));
+
+            float u = apDistance / abDistance;
+
+            float x = n1.NX * u + n2.NX * (1 - u);
+
+            float y = n1.NY * u + n2.NY * (1 - u);
+
+            float z = n1.NZ * u + n2.NZ * (1 - u);
+
+            return new Normal(x, y, z);
         }
 
         private Color InterpolateColor(Vertex v1, Vertex v2, PointF p)
@@ -839,7 +1164,7 @@ namespace CG_Lab
                 //try
                 //{
                     currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName);
-                    currentPolyhedron = currentPolyhedron.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, -1);
+                currentPolyhedron = currentPolyhedron.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, 0);
                     RenderScene();
                     //DrawPolyhedron(currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName), currPlane);
                         //.Scaled(100, 100, 100)
@@ -1012,15 +1337,24 @@ namespace CG_Lab
             return new Matrix<T>(values);
         }
 
+        public static Matrix<float> Transpose(Matrix<float> matrix)
+        {
+            return new float[4, 4] {
+                { matrix[0, 0], matrix[1, 0], matrix[2, 0], matrix[3, 0] },
+                { matrix[0, 1], matrix[1, 1], matrix[2, 1], matrix[3, 1] },
+                { matrix[0, 2], matrix[1, 2], matrix[2, 2], matrix[3, 2] },
+                { matrix[0, 3], matrix[1, 3], matrix[2, 3], matrix[3, 3] }
+            };
+        }
+
+
+
         /*public static implicit operator Vertex(Matrix<T> m)
         {
             return new Vertex(Convert.ToSingle(m[0, 0]), Convert.ToSingle(m[0, 1]), Convert.ToSingle(m[0, 2]));
         }*/
 
-        public static implicit operator Normal(Matrix<T> m)
-        {
-            return new Normal(Convert.ToSingle(m[0, 0]), Convert.ToSingle(m[0, 1]), Convert.ToSingle(m[0, 2]));
-        }
+        
 
         public Matrix(Vertex vertex)
         {
@@ -1096,7 +1430,7 @@ namespace CG_Lab
     }
 
     // Нормаль вершины
-    public struct Normal
+    public class Normal
     {
         public float NX { get; private set; }
         public float NY { get; private set; }
@@ -1119,9 +1453,21 @@ namespace CG_Lab
                 NZ = 0;
             }
         }
+
+        public static implicit operator Normal(Matrix<float> m)
+        {
+            if (m[0, 3] != 0)
+            {
+                return new Normal(m[0, 0] / m[0, 3], m[0, 1] / m[0, 3], m[0, 2] / m[0, 3]);
+            }
+            else
+            {
+                return new Normal(m[0, 0], m[0, 1], m[0, 2]);
+            }
+        }
     }
 
-    public struct Vertex
+    public class Vertex
     {
         public Color color { get; set; }
         public float X { get; set; }
@@ -1158,6 +1504,12 @@ namespace CG_Lab
             }
             int count = face.Vertices.Count();
             return new Vertex(x / count, y / count, z / count);
+        }
+
+        public static Vertex Reflect(Vertex direction, Vertex normal)
+        {
+            // direction и normal должны быть нормализованы
+            return direction - 2 * Vertex.Dot(direction, normal) * normal;
         }
 
         // Находим центр многогранника
@@ -1373,7 +1725,7 @@ namespace CG_Lab
             Vertices = new List<Vertex>();
             Normals = new List<Normal>();
             Random random = new Random();
-            color = Color.FromArgb(random.Next(256), random.Next(256), random.Next(256));
+            color = Color.Red; // Color.FromArgb(random.Next(256), random.Next(256), random.Next(256));
         }
 
         public PolyHedron(List<Face> faces, List<Vertex> vertices, List<Normal> normals, Color color)
@@ -2404,14 +2756,20 @@ namespace CG_Lab
                     var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                     
                     int[] vertexIndices = new int[parts.Length - 1];
-                    
+
+                    if (polyhedron.Vertices.Count == 0)
+                    {
+                        polyhedron.Vertices = new List<Vertex>(vertices);
+                        polyhedron.Normals = new List<Normal>(normals);
+                    }
+
                     for (int i = 1; i < parts.Length; i++)
                     {
                         var indices = parts[i].Split('/');
                         int vertexIndex = int.Parse(indices[0]) - 1;
                         vertexIndices[i - 1] = vertexIndex;
 
-                        polyhedron.Vertices = new List<Vertex>(vertices);
+                        
 
                         polyhedron.Vertices[vertexIndex] = new Vertex(
                                 vertices[vertexIndex].X,
@@ -2419,12 +2777,10 @@ namespace CG_Lab
                                 vertices[vertexIndex].Z
                             );
 
-                        polyhedron.Normals = new List<Normal>(Enumerable.Repeat(new Normal(0, 0, 0), vertices.Count));
-
                         // Присваиваем нормаль, если она есть
                         if (indices.Length > 2 && int.TryParse(indices[2], out int normalIndex))
                         {
-                            polyhedron.Normals = new List<Normal>(normals);
+                            // polyhedron.Normals = new List<Normal>(normals);
 
                             polyhedron.Normals[normalIndex - 1] = new Normal(
                                     normals[normalIndex - 1].NX,
