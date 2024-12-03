@@ -57,7 +57,7 @@ namespace CG_Lab
             clearPB = new Bitmap(pictureBox1.Image);
             zbbm = clearPB;
 
-            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -50f, 255, 255, 255, true);
+            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -50f, 255, 255, 255, false);
 
             camera = new Camera(
                                 position:    new Vertex(pictureBox1.Width / 2, pictureBox1.Height / 2, -10f),
@@ -226,7 +226,7 @@ namespace CG_Lab
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
                             Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
-                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color, p, lightpos));
                         }
                     }
                 }
@@ -240,7 +240,7 @@ namespace CG_Lab
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
                             Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
-                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color, p, lightpos));
                         }
                     }
                 }
@@ -263,7 +263,7 @@ namespace CG_Lab
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
                             Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
-                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color, p, lightpos));
                         }
                     }
                 }
@@ -277,7 +277,7 @@ namespace CG_Lab
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
                             Vertex norm = Interpolate(p, v1, n1, v2, n2, v3, n3);
-                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color));
+                            zbbm.SetPixel((int)cur_x, (int)cur_y, ToonShadingModel(norm, (lightpos - p), poly.color, p, lightpos));
                         }
                     }
                 }
@@ -287,11 +287,11 @@ namespace CG_Lab
 
         }
 
-        public Color ToonShadingModel(Vertex n, Vertex l, Color diffColor)
+        public Color ToonShadingModel(Vertex n, Vertex l, Color diffColor, Vertex fragPos, Vertex lightPos)
         {
             Vertex n2 = n.Normalize();
-            Vertex l2 = l.Normalize();
-            double diff = 0.2 + Math.Max(Vertex.Dot(n2, l2), 0.0);
+            // Vertex l2 = l.Normalize();
+            /*double diff = 0.2 + Math.Max(Vertex.Dot(n2, l2), 0.0);
             Color clr;
 
             if (diff < 0.4)
@@ -305,13 +305,30 @@ namespace CG_Lab
             else //if (diff < 1.15)
             {
                 clr = MultColor(1.3, diffColor);
-            }
-            //else  // Блики
-            //{
-            //    clr = Color.White;
-            //}
+            }*/
 
-            return clr;
+            Vertex lightDir = (lightPos - fragPos).Normalize();
+
+            // View direction
+            Vertex viewDir = (camera.Position - fragPos).Normalize();
+
+            // Reflection direction for Phong specular
+            Vertex reflectDir = Vertex.Reflect(new Vertex(-lightDir.X, -lightDir.Y, -lightDir.Z), n2);
+
+            // Ambient component
+            float ambientIntensity = 0.2f;
+            Color ambient = ScaleColor(diffColor, ambientIntensity);
+
+            // Diffuse component
+            float diffIntensity = Math.Max(0, Vertex.Dot(n2, lightDir));
+            Color diffuse = ScaleColor(diffColor, Toonify(diffIntensity));
+
+            // Specular component (Phong)
+            float specIntensity = (float)Math.Pow(Math.Max(0, Vertex.Dot(viewDir, reflectDir)), 32); // Shininess = 16
+            Color specular = ScaleColor(Color.White, Toonify(specIntensity));
+
+            // Combine
+            return CombineColors(ambient, diffuse, specular);
         }
 
         private static Color MultColor(double c, Color color)
@@ -1725,7 +1742,7 @@ namespace CG_Lab
             Vertices = new List<Vertex>();
             Normals = new List<Normal>();
             Random random = new Random();
-            color = Color.Red; // Color.FromArgb(random.Next(256), random.Next(256), random.Next(256));
+            color = Color.FromArgb(random.Next(256), random.Next(256), random.Next(256));
         }
 
         public PolyHedron(List<Face> faces, List<Vertex> vertices, List<Normal> normals, Color color)
