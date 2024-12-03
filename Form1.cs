@@ -57,7 +57,7 @@ namespace CG_Lab
             clearPB = new Bitmap(pictureBox1.Image);
             zbbm = clearPB;
 
-            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -50f, 255, 255, 255, false);
+            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -50f, 255, 255, 255, true);
 
             camera = new Camera(
                                 position:    new Vertex(pictureBox1.Width / 2, pictureBox1.Height / 2, -10f),
@@ -177,7 +177,7 @@ namespace CG_Lab
             for (int i = 0; i < pictureBox1.Width; i++) //x
                 for (int j = 0; j < pictureBox1.Height; j++) //y
                 {
-                    Zbuffer[i, j] = float.MinValue;
+                    Zbuffer[i, j] = float.MaxValue;
                 }
 
             foreach (Face face in poly.Faces)
@@ -221,7 +221,7 @@ namespace CG_Lab
                     for (float cur_x = x1; cur_x <= x2; cur_x += 0.5f)
                     {
                         float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
-                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z < Zbuffer[(int)cur_x, (int)cur_y])
                         {
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
@@ -235,7 +235,7 @@ namespace CG_Lab
                     for (float cur_x = x1; cur_x >= x2; cur_x -= 0.5f)
                     {
                         float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
-                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z < Zbuffer[(int)cur_x, (int)cur_y])
                         {
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
@@ -258,7 +258,7 @@ namespace CG_Lab
                     for (float cur_x = x1; cur_x <= x2; cur_x += 0.5f)
                     {
                         float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
-                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z < Zbuffer[(int)cur_x, (int)cur_y])
                         {
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
@@ -272,7 +272,7 @@ namespace CG_Lab
                     for (float cur_x = x1; cur_x >= x2; cur_x -= 0.5f)
                     {
                         float cur_z = FindZbyX(cur_x, x1, z1, x2, z2);
-                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z > Zbuffer[(int)cur_x, (int)cur_y])
+                        if (CheckBorders((int)cur_x, (int)cur_y) && cur_z < Zbuffer[(int)cur_x, (int)cur_y])
                         {
                             Zbuffer[(int)cur_x, (int)cur_y] = cur_z;
                             Vertex p = new Vertex(cur_x, cur_y, cur_z);
@@ -1181,8 +1181,10 @@ namespace CG_Lab
                 //try
                 //{
                     currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName);
+
                 currentPolyhedron = currentPolyhedron.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, 0);
-                    RenderScene();
+
+                RenderScene();
                     //DrawPolyhedron(currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName), currPlane);
                         //.Scaled(100, 100, 100)
                         //.RotatedXAxis(180)
@@ -1214,6 +1216,19 @@ namespace CG_Lab
             //viewDirection = CalculateViewVector(cameraPosition);
             //DrawPolyhedron(currentPolyhedron.FilterVisibleFaces(viewDirection), currPlane);
 
+        }
+
+        private void lightingBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lightingBox.SelectedIndex == 0)
+            {
+                lightSource.Gouraud = true;
+            }
+            else
+            {
+                lightSource.Gouraud = false;
+            }
+            RenderScene();
         }
     }
 
