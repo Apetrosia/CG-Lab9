@@ -66,7 +66,7 @@ namespace CG_Lab
             clearPB = new Bitmap(pictureBox1.Image);
             zbbm = clearPB;
 
-            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -50f, 255, 255, 255, true);
+            lightSource = new LightSource(pictureBox1.Width / 2 - 75, pictureBox1.Height / 2 - 75, -200f, 255, 255, 255, true);
 
             camera = new Camera(
                                 position:    new Vertex(pictureBox1.Width / 2, pictureBox1.Height / 2, -10f),
@@ -161,18 +161,15 @@ namespace CG_Lab
                     renderPoly.Vertices[i] *= projectionMatrix;
 
                     renderPoly.Vertices[i] = new Vertex((renderPoly.Vertices[i].X + 1) * pictureBox1.Width / 2,
-                        (1 - renderPoly.Vertices[i].Y) * pictureBox1.Height / 2,
-                        z,
-                        c);
-                }
-
-                renderPoly.Vertices[i] = new Vertex((renderPoly.Vertices[i].X + 1) * pictureBox1.Width / 2,
                     (1 - renderPoly.Vertices[i].Y) * pictureBox1.Height / 2,
                     z,
                     u,
                     v,
                     c
                     );
+                }
+
+                
             }
 
             // Z-буфер
@@ -190,9 +187,9 @@ namespace CG_Lab
 
             float cos = Math.Max(0f, n.NX * toLS.NX + n.NY * toLS.NY + n.NZ * toLS.NZ);
 
-            return Color.FromArgb(Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.R * lightSource.Intensity.R * cos))),
-                Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.G * lightSource.Intensity.G * cos))),
-                Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.B * lightSource.Intensity.B * cos))));
+            return Color.FromArgb(Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.R * lightSource.Intensity.R / 255f * cos))),
+                Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.G * lightSource.Intensity.G / 255f * cos))),
+                Math.Max(0, Math.Min(255, (int)Math.Round(polyColor.B * lightSource.Intensity.B / 255f * cos))));
         }
 
         private void ZbufferDraw2(PolyHedron poly)
