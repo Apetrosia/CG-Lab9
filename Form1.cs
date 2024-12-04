@@ -10,6 +10,8 @@ using System.Windows.Forms;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Reflection;
+using System.Diagnostics.Eventing.Reader;
+using System.Drawing.Drawing2D;
 
 namespace CG_Lab
 {
@@ -46,6 +48,8 @@ namespace CG_Lab
         private Timer actionTimer;
 
         Vertex viewDirection = new Vertex(0, 0, -1);
+
+        Bitmap currentTexture;
 
         public Form1()
         {
@@ -118,18 +122,25 @@ namespace CG_Lab
             //PolyHedron renderPoly = currentPolyhedron.Clone(); //currentPolyhedron.FilterVisibleFaces(camera.Direction);
 
             PolyHedron renderPoly = currentPolyhedron.FilterVisibleFaces(camera, Projection.Perspective);
-
+            
             // Ламберт
             if (lightSource.Gouraud)
                 for (int i = 0; i < renderPoly.Vertices.Count; i++)
-                    renderPoly.Vertices[i] = new Vertex(renderPoly.Vertices[i].X, renderPoly.Vertices[i].Y, renderPoly.Vertices[i].Z,
+                {
+                    float u = renderPoly.Vertices[i].U;
+                    float v = renderPoly.Vertices[i].V;
+                    renderPoly.Vertices[i] = new Vertex(renderPoly.Vertices[i].X, renderPoly.Vertices[i].Y, renderPoly.Vertices[i].Z,u, v,
                         GetVertexColorLambert(renderPoly.Vertices[i], renderPoly.Normals[i], renderPoly.color));
+                }    
+                    
 
             // Очистка экрана
             // pictureBox1.Image = clearPB;
 
             for (int i = 0; i < renderPoly.Vertices.Count; i++)
             {
+                float u = renderPoly.Vertices[i].U;
+                float v = renderPoly.Vertices[i].V;
                 Color c = renderPoly.Vertices[i].color;
 
                 // Преобразование в пространстве камеры
@@ -140,7 +151,10 @@ namespace CG_Lab
                 renderPoly.Vertices[i] = new Vertex((renderPoly.Vertices[i].X + 1) * pictureBox1.Width / 2,
                     (1 - renderPoly.Vertices[i].Y) * pictureBox1.Height / 2,
                     z,
-                    c);
+                    u,
+                    v,
+                    c
+                    );
             }
 
             // Z-буфер
@@ -201,6 +215,10 @@ namespace CG_Lab
                 int minY = (int)Math.Round(v.Min(vertex => vertex.Y));
                 int maxY = (int)Math.Round(v.Max(vertex => vertex.Y));
 
+                Bitmap resized = null;
+                if (texturePictureBox2.Image != null)
+                   resized = ResizeBitmap(currentTexture, (int)(maxX - minX), (maxY - minY));
+
                 int il = 1, ir = 1;
                 while (il < leftPoints.Count - 1 && (int)Math.Round(leftPoints[il].Y) == (int)Math.Round(leftPoints[il - 1].Y)) il++;
                 while (ir < rightPoints.Count - 1 && (int)Math.Round(rightPoints[ir].Y) == (int)Math.Round(rightPoints[ir - 1].Y)) ir++;
@@ -212,6 +230,9 @@ namespace CG_Lab
                     Color lbColor = InterpolateColor(leftPoints[il - 1], leftPoints[il], leftBorder);
                     Color rbColor = InterpolateColor(rightPoints[ir - 1], rightPoints[ir], rightBorder);
 
+                    PointF leftTexture = InterpolateTexture(leftPoints[il - 1], leftPoints[il], leftBorder);
+                    PointF rightTexture = InterpolateTexture(rightPoints[ir - 1], rightPoints[ir], rightBorder);
+
                     for (int j = (int)Math.Round(leftBorder.X); j <= (int)Math.Round(rightBorder.X); j++)
                     {
                         if (j < 0 || j >= pictureBox1.Width || i < 0 || i >= pictureBox1.Height) continue;
@@ -222,19 +243,40 @@ namespace CG_Lab
                         if (z > 0 && z < Zbuffer[j, i])
                         {
                             Zbuffer[j, i] = z;
-                            if (lightSource.Gouraud)
+                            if (texturePictureBox2.Image != null)
+                            {
+
+                                PointF pixelTexture = InterpolateTexture(
+                                  new Vertex(leftBorder.X, leftBorder.Y, z, leftTexture.X, leftTexture.Y),
+                                new Vertex(rightBorder.X, rightBorder.Y, z, rightTexture.X, rightTexture.Y), new PointF(j, i));
+
+
+                                // Получаем цвет пикселя из текстуры
+                                int texX = (int)(pixelTexture.X  * resized.Width) % resized.Width;
+                                int texY = (int)((1.0f-pixelTexture.Y ) * resized.Height) % resized.Height;
+
+                                texX = Clamp(texX, 0, resized.Width - 1);
+                                texY = Clamp(texY, 0, resized.Height - 1);
+
+                                Color textureColor = resized.GetPixel(texX, texY);
+
+                                // Устанавливаем цвет пикселя на изображении
+                                zbbm.SetPixel(j, i, textureColor);
+                            }
+                            else if (lightSource.Gouraud)
                             {
                                 zbbm.SetPixel(j, i, InterpolateColor(new Vertex(leftBorder.X, leftBorder.Y, z, lbColor),
                                     new Vertex(rightBorder.X, rightBorder.Y, z, rbColor),
                                     new PointF(j, i)));
                             }
-                            else
+                            else 
                             {
                                 if (j == (int)Math.Round(leftBorder.X) || j == (int)Math.Round(rightBorder.X) || i == minY || i == maxY)
                                     zbbm.SetPixel(j, i, Color.Black);
                                 else
                                     zbbm.SetPixel(j, i, poly.color);
                             }
+
                         }
                     }
 
@@ -245,6 +287,61 @@ namespace CG_Lab
 
             pictureBox1.Image = zbbm;
         }
+        public Bitmap ResizeBitmap(Bitmap bmp, int width, int height)
+        {
+            Bitmap result = new Bitmap(width, height);
+            using (Graphics g7 = Graphics.FromImage(result))
+            {
+                g7.DrawImage(bmp, 0, 0, width, height);
+            }
+
+            return result;
+        }
+        public static int Clamp(int value, int min, int max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return (int)value;
+        }
+
+        private PointF InterpolateTexture(Vertex v1, Vertex v2, PointF p)
+        {
+            // Вектор AB
+            float dx = v2.X - v1.X;
+            float dy = v2.Y - v1.Y;
+
+            float lengthSquared = dx * dx + dy * dy;      
+            // Проекция P на линию AB
+            float t = ((p.X - v1.X) * dx + (p.Y - v1.Y) * dy) / lengthSquared;
+
+            // Интерполяция текстурных координат
+            float textureX = v1.U + t * (v2.U - v1.U);
+            float textureY = v1.V + t * (v2.V - v1.V);
+
+            return new PointF(textureX, textureY);
+        }
+        private PointF BiInterpolateTexture(Vertex v1, Vertex v2, Vertex v3, PointF p)
+        {
+            // Векторные координаты для вычислений
+            float x1 = v1.X, y1 = v1.Y, u1 = v1.U, v1Coord = v1.V;
+            float x2 = v2.X, y2 = v2.Y, u2 = v2.U, v2Coord = v2.V;
+            float x3 = v3.X, y3 = v3.Y, u3 = v3.U, v3Coord = v3.V;
+
+            // Площадь треугольника
+            float area = (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
+
+            // Барицентрические координаты
+            float alpha = (p.X * (y2 - y3) + p.Y * (x3 - x2) + x2 * y3 - x3 * y2) / area;
+            float beta = (p.X * (y3 - y1) + p.Y * (x1 - x3) + x3 * y1 - x1 * y3) / area;
+            float gamma = 1 - alpha - beta;
+
+            // Интерполяция текстурных координат
+            float textureX = alpha * u1 + beta * u2 + gamma * u3;
+            float textureY = alpha * v1Coord + beta * v2Coord + gamma * v3Coord;
+
+            return new PointF(textureX, textureY);
+        }
+
 
         private Color InterpolateColor(Vertex v1, Vertex v2, PointF p)
         {
@@ -838,7 +935,8 @@ namespace CG_Lab
             {
                 //try
                 //{
-                    currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName);
+                currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName);
+                    //textBox4.Text = currentPolyhedron.Vertices[1].U.ToString();
                     currentPolyhedron = currentPolyhedron.Moved(pictureBox1.Width / 2, pictureBox1.Height / 2, -1);
                     RenderScene();
                     //DrawPolyhedron(currentPolyhedron = PolyHedron.LoadFromObj(openFileDialog1.FileName), currPlane);
@@ -872,6 +970,46 @@ namespace CG_Lab
             //viewDirection = CalculateViewVector(cameraPosition);
             //DrawPolyhedron(currentPolyhedron.FilterVisibleFaces(viewDirection), currPlane);
 
+        }
+
+        private void button5_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.Filter = "Изображения (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg";
+
+                if (openFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        //Bitmap originalTexture = new Bitmap(openFileDialog.FileName);
+                        //Bitmap resizedTexture = new Bitmap(256, 256);
+                        /*using (Graphics g = Graphics.FromImage(resizedTexture))
+                        {
+                            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                            g.DrawImage(originalTexture, 0, 0, 256, 256);
+                        }*/
+                        // Загружаем изображение
+                        currentTexture = new Bitmap(openFileDialog.FileName);
+
+                        texturePictureBox2.Image = currentTexture;
+
+                        // Сообщаем об успешной загрузке
+                        MessageBox.Show("Текстура загружена успешно!", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка при загрузке текстуры: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                RenderScene();
+            }
+        }
+
+        private void button6_Click(object sender, EventArgs e)
+        {
+            texturePictureBox2.Image = null;
+            RenderScene();
         }
     }
 
@@ -1120,7 +1258,36 @@ namespace CG_Lab
             }
         }
     }
+    public struct Texture
+    {
+        private Bitmap image;
+        public List<PointF> Coordinates { get; set; }
+        public Texture(Bitmap texture)
+        {
+            image = texture;
+            Coordinates = new List<PointF>();
+        }
+        public void AddCoordinate(float u, float v)
+        {
+            Coordinates.Add(new PointF(u, v));
+        }
+        public static int Clamp(int value, int min, int max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return (int)value;
+        }
+        public Color GetColor(float u, float v)
+        {
+            int x = (int)(u * (image.Width - 1));
+            int y = (int)(v * (image.Height - 1));
 
+            x = Clamp(x, 0, image.Width - 1);
+            y = Clamp(y, 0, image.Height - 1);
+
+            return image.GetPixel(x, y);
+        }
+    }
     public struct Vertex
     {
         public Color color { get; set; }
@@ -1129,6 +1296,8 @@ namespace CG_Lab
         public float Y { get; set; }
 
         public float Z { get; set; }
+        public float U { get; set; }
+        public float V { get; set; }
 
         public Vertex(float x, float y, float z)
         {
@@ -1136,6 +1305,8 @@ namespace CG_Lab
             Y = y;
             Z = z;
             color = Color.White;
+            U = 0;
+            V = 0;
         }
 
         public Vertex(float x, float y, float z, Color c)
@@ -1144,8 +1315,27 @@ namespace CG_Lab
             Y = y;
             Z = z;
             color = c;
+            U = 0;
+            V = 0;
         }
-
+        public Vertex(float x, float y, float z, float u, float v)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+            U = u;
+            V = v;
+            color = Color.White;
+        }
+        public Vertex(float x, float y, float z, float u, float v, Color c)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+            U = u;
+            V = v;
+            color = c;
+        }
         // Находим центр грани
         public static Vertex GetFaceCentroid(Face face, List<Vertex> vertices)
         {
@@ -1493,7 +1683,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= RxMatrix;
+                //newPoly.Vertices[i] *= RxMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * RxMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= RxMatrix;
             }
 
@@ -1517,7 +1720,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= RxMatrix;
+                //newPoly.Vertices[i] *= RxMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * RxMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= RxMatrix;
             }
 
@@ -1541,7 +1757,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= RyMatrix;
+                //newPoly.Vertices[i] *= RyMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * RyMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= RyMatrix;
             }
 
@@ -1567,7 +1796,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= RzMatrix;
+                //newPoly.Vertices[i] *= RzMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * RzMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= RzMatrix;
             }
 
@@ -1588,7 +1830,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= translationMatrix;
+                //newPoly.Vertices[i] *= translationMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * translationMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
             }
 
             return newPoly;
@@ -1608,7 +1863,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= translationMatrix;
+                //newPoly.Vertices[i] *= translationMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * translationMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
             }
 
             return newPoly;
@@ -1633,7 +1901,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= translationMatrix;
+                //newPoly.Vertices[i] *= translationMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * translationMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= translationMatrix;
             }
 
@@ -1659,7 +1940,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= translationMatrix;
+                //newPoly.Vertices[i] *= translationMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * translationMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= translationMatrix;
             }
 
@@ -1685,7 +1979,20 @@ namespace CG_Lab
 
             for (int i = 0; i < newPoly.Vertices.Count; i++)
             {
-                newPoly.Vertices[i] *= translationMatrix;
+                //newPoly.Vertices[i] *= translationMatrix;
+                var oldVertex = newPoly.Vertices[i];
+
+                // Создаем новую вершину с обновленными координатами
+                Vertex newVertex = oldVertex * translationMatrix;
+
+                // Сохраняем текстурные координаты
+                newPoly.Vertices[i] = new Vertex(
+                    newVertex.X,
+                    newVertex.Y,
+                    newVertex.Z,
+                    oldVertex.U,
+                    oldVertex.V
+                );
                 newPoly.Normals[i] *= translationMatrix;
             }
 
@@ -1874,15 +2181,15 @@ namespace CG_Lab
         {
             var tetra = new PolyHedron();
 
-            tetra.Vertices.Add(new Vertex(-1, 1, -1));
-            tetra.Vertices.Add(new Vertex(1, -1, -1));
-            tetra.Vertices.Add(new Vertex(1, 1, 1));
-            tetra.Vertices.Add(new Vertex(-1, -1, 1));
+            tetra.Vertices.Add(new Vertex(-1, 1, -1, 0.5f, 0f));  
+            tetra.Vertices.Add(new Vertex(1, -1, -1, 1f, 1f));    
+            tetra.Vertices.Add(new Vertex(1, 1, 1, 0f, 1f));      
+            tetra.Vertices.Add(new Vertex(-1, -1, 1, 0f, 1f));
 
             tetra.Faces.Add(new Face(2, 1, 0));
-            tetra.Faces.Add(new Face(3, 1, 0));
+            tetra.Faces.Add(new Face(0, 1, 3));
             tetra.Faces.Add(new Face(3, 2, 0));
-            tetra.Faces.Add(new Face(3, 2, 1));
+            tetra.Faces.Add(new Face(1, 2, 3));
 
             CalculateNormals(tetra);
 
@@ -1899,7 +2206,14 @@ namespace CG_Lab
             {
                 octa.Vertices.Add(cube.GetFaceCenter(face));
             }
-
+            for (int i = 0; i < octa.Vertices.Count; i++)
+            {
+                var v = octa.Vertices[i];
+                
+                float u = (v.X + 1) / 2; 
+                float vCoord = (v.Y + 1) / 2;
+                octa.Vertices[i] = new Vertex(v.X, v.Y, v.Z, u, vCoord);
+            }
             var octaCenters = cube.Scaled(1 / 3f, 1 / 3f, 1 / 3f).Vertices;
 
             for (int i = 0; i < 8; i++)
@@ -2368,7 +2682,6 @@ namespace CG_Lab
 
             File.WriteAllText(filePath, sb.ToString());
         }
-
         public static PolyHedron LoadFromObj(string filePath)
         {
             var polyhedron = new PolyHedron();
@@ -2376,73 +2689,114 @@ namespace CG_Lab
 
             var vertices = new List<Vertex>();
             var normals = new List<Normal>();
+            var textureCoordinates = new List<PointF>();
 
             foreach (var line in lines)
             {
                 if (line.StartsWith("v "))
                 {
                     var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    
+
                     float x = float.Parse(parts[1]);
                     float y = float.Parse(parts[2]);
                     float z = float.Parse(parts[3]);
-                    
+
                     vertices.Add(new Vertex(x, y, z));
                 }
                 else if (line.StartsWith("vn "))
                 {
                     var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    
+
                     float nx = float.Parse(parts[1]);
                     float ny = float.Parse(parts[2]);
                     float nz = float.Parse(parts[3]);
 
                     normals.Add(new Normal(nx, ny, nz));
                 }
+                else if (line.StartsWith("vt "))
+                {
+                    var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    float u = float.Parse(parts[1]);
+                    float v = float.Parse(parts[2]);
+
+                    textureCoordinates.Add(new PointF(u, v));
+                }
                 else if (line.StartsWith("f "))
                 {
                     var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    
+
                     int[] vertexIndices = new int[parts.Length - 1];
-                    
+                    int[] textureIndices = new int[parts.Length - 1];
+                    int[] normalIndices = new int[parts.Length - 1];
+
                     for (int i = 1; i < parts.Length; i++)
                     {
                         var indices = parts[i].Split('/');
-                        int vertexIndex = int.Parse(indices[0]) - 1;
-                        vertexIndices[i - 1] = vertexIndex;
 
-                        polyhedron.Vertices = new List<Vertex>(vertices);
+                        // Вершинный индекс
+                        vertexIndices[i - 1] = int.Parse(indices[0]) - 1;
 
-                        polyhedron.Vertices[vertexIndex] = new Vertex(
-                                vertices[vertexIndex].X,
-                                vertices[vertexIndex].Y,
-                                vertices[vertexIndex].Z
-                            );
-
-                        polyhedron.Normals = new List<Normal>(Enumerable.Repeat(new Normal(0, 0, 0), vertices.Count));
-
-                        // Присваиваем нормаль, если она есть
-                        if (indices.Length > 2 && int.TryParse(indices[2], out int normalIndex))
+                        // Текстурный индекс (если указан)
+                        if (indices.Length > 1 && !string.IsNullOrEmpty(indices[1]))
                         {
-                            polyhedron.Normals = new List<Normal>(normals);
+                            textureIndices[i - 1] = int.Parse(indices[1]) - 1;
+                        }
+                        else
+                        {
+                            textureIndices[i - 1] = -1; // Нет текстуры
+                        }
 
-                            polyhedron.Normals[normalIndex - 1] = new Normal(
-                                    normals[normalIndex - 1].NX,
-                                    normals[normalIndex - 1].NY,
-                                    normals[normalIndex - 1].NZ
-                                );
+                        // Индекс нормали (если указан)
+                        if (indices.Length > 2 && !string.IsNullOrEmpty(indices[2]))
+                        {
+                            normalIndices[i - 1] = int.Parse(indices[2]) - 1;
+                        }
+                        else
+                        {
+                            normalIndices[i - 1] = -1; // Нет нормали
                         }
                     }
-                    
+
+                    // Присвоение текстурных координат и нормалей вершинам
+                    for (int i = 0; i < vertexIndices.Length; i++)
+                    {
+                        int vertexIndex = vertexIndices[i];
+
+                        // Обновление текстурных координат
+                        if (textureIndices[i] >= 0 && textureIndices[i] < textureCoordinates.Count)
+                        {
+                            vertices[vertexIndex] = new Vertex(
+                                vertices[vertexIndex].X,
+                                vertices[vertexIndex].Y,
+                                vertices[vertexIndex].Z,
+                                textureCoordinates[textureIndices[i]].X,
+                                textureCoordinates[textureIndices[i]].Y
+                            );
+                        }
+
+                        // Присвоение нормалей (если они есть)
+                        if (normalIndices[i] >= 0 && normalIndices[i] < normals.Count)
+                        {
+                            if (polyhedron.Normals.Count == 0)
+                            {
+                                polyhedron.Normals = new List<Normal>(new Normal[vertices.Count]);
+                            }
+
+                            polyhedron.Normals[vertexIndex] = normals[normalIndices[i]];
+                        }
+                    }
+
+                    // Создание грани
                     polyhedron.Faces.Add(new Face(vertexIndices));
-                }
-                else
-                {
-                    // Пропуск пока
                 }
             }
 
+            // Финальное присвоение вершин
+            polyhedron.Vertices = vertices;
+
             return polyhedron;
         }
+       
     }
 }
