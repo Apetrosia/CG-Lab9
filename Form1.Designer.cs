@@ -77,6 +77,8 @@
             this.texturePictureBox2 = new System.Windows.Forms.PictureBox();
             this.button6 = new System.Windows.Forms.Button();
             this.textBox4 = new System.Windows.Forms.TextBox();
+            this.lightingBox = new System.Windows.Forms.ComboBox();
+            this.label9 = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown1)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).BeginInit();
@@ -780,6 +782,35 @@
             this.Controls.Add(this.button6);
             this.Controls.Add(this.texturePictureBox2);
             this.Controls.Add(this.button5);
+            // lightingBox
+            // 
+            this.lightingBox.FormattingEnabled = true;
+            this.lightingBox.Items.AddRange(new object[] {
+            "Гуро",
+            "ТунШейдинг"});
+            this.lightingBox.Location = new System.Drawing.Point(843, 600);
+            this.lightingBox.Name = "lightingBox";
+            this.lightingBox.Size = new System.Drawing.Size(121, 21);
+            this.lightingBox.TabIndex = 44;
+            this.lightingBox.Text = "Гуро";
+            this.lightingBox.SelectedIndexChanged += new System.EventHandler(this.lightingBox_SelectedIndexChanged);
+            // 
+            // label9
+            // 
+            this.label9.AutoSize = true;
+            this.label9.Location = new System.Drawing.Point(873, 575);
+            this.label9.Name = "label9";
+            this.label9.Size = new System.Drawing.Size(51, 13);
+            this.label9.TabIndex = 45;
+            this.label9.Text = "Шейдинг";
+            // 
+            // Form1
+            // 
+            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(1283, 682);
+            this.Controls.Add(this.label9);
+            this.Controls.Add(this.lightingBox);
             this.Controls.Add(this.numericUpDownZ);
             this.Controls.Add(this.numericUpDownY);
             this.Controls.Add(this.numericUpDownX);
@@ -847,7 +878,6 @@
             ((System.ComponentModel.ISupportInitialize)(this.texturePictureBox2)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
-
         }
 
         #endregion
@@ -901,6 +931,8 @@
         private System.Windows.Forms.PictureBox texturePictureBox2;
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.TextBox textBox4;
+        private System.Windows.Forms.ComboBox lightingBox;
+        private System.Windows.Forms.Label label9;
     }
 }
 
